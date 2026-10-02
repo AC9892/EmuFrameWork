@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <mmsystem.h>
+#include <Xinput.h>
 #include <shellapi.h>
 #include <emuframe/emuframe.h>
 #include "settings.hpp"
@@ -63,8 +64,23 @@ void reload_settings(){std::string warning;auto updated=load_settings(config_pat
 void show_info(){EF_GameInfo g{};if(ef_get_game_info(emulator,&g)!=EF_OK)return;char msg[1500];std::snprintf(msg,sizeof msg,"Title: %s\nSystem: %s\nSize: %llu bytes\nSHA-256: %s\nSave: %s\nPath: %s",g.title,g.system==EF_SYSTEM_GBA?"Game Boy Advance":g.system==EF_SYSTEM_GBC?"Game Boy Color":"Game Boy",(unsigned long long)g.rom_size,g.sha256,g.save_type,g.loaded_path);MessageBoxA(window_handle,msg,"Game Info",MB_OK);}
 void show_performance(){EF_Performance p{};ef_get_performance(emulator,&p);char msg[512];std::snprintf(msg,sizeof msg,"Emulated FPS: %.2f\nHost frame: %.2f ms\nEmulation frame: %.2f ms\nAudio queued: %llu frames\nFrames: %llu\nDropped: %llu",p.emulated_fps,p.host_frame_ms,p.emulation_frame_ms,(unsigned long long)p.audio_buffer_frames,(unsigned long long)p.frames,(unsigned long long)p.dropped_frames);MessageBoxA(window_handle,msg,"Performance",MB_OK);}
 uint32_t keyboard_buttons(){uint32_t b=0;auto down=[](int key){return (GetAsyncKeyState(key)&0x8000)!=0;};if(down(VK_UP))b|=EF_BUTTON_UP;if(down(VK_DOWN))b|=EF_BUTTON_DOWN;if(down(VK_LEFT))b|=EF_BUTTON_LEFT;if(down(VK_RIGHT))b|=EF_BUTTON_RIGHT;if(down('Z'))b|=EF_BUTTON_A;if(down('X'))b|=EF_BUTTON_B;if(down(VK_RETURN))b|=EF_BUTTON_START;if(down(VK_BACK))b|=EF_BUTTON_SELECT;if(down('A'))b|=EF_BUTTON_L;if(down('S'))b|=EF_BUTTON_R;return b;}
+uint32_t controller_buttons(){
+  XINPUT_STATE state{};if(XInputGetState(0,&state)!=ERROR_SUCCESS)return 0;
+  const auto& pad=state.Gamepad;uint32_t b=0;
+  if((pad.wButtons&XINPUT_GAMEPAD_DPAD_UP)||pad.sThumbLY>XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE)b|=EF_BUTTON_UP;
+  if((pad.wButtons&XINPUT_GAMEPAD_DPAD_DOWN)||pad.sThumbLY<-XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE)b|=EF_BUTTON_DOWN;
+  if((pad.wButtons&XINPUT_GAMEPAD_DPAD_LEFT)||pad.sThumbLX<-XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE)b|=EF_BUTTON_LEFT;
+  if((pad.wButtons&XINPUT_GAMEPAD_DPAD_RIGHT)||pad.sThumbLX>XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE)b|=EF_BUTTON_RIGHT;
+  if(pad.wButtons&XINPUT_GAMEPAD_A)b|=EF_BUTTON_A;
+  if(pad.wButtons&XINPUT_GAMEPAD_B)b|=EF_BUTTON_B;
+  if(pad.wButtons&XINPUT_GAMEPAD_START)b|=EF_BUTTON_START;
+  if(pad.wButtons&XINPUT_GAMEPAD_BACK)b|=EF_BUTTON_SELECT;
+  if(pad.wButtons&XINPUT_GAMEPAD_LEFT_SHOULDER)b|=EF_BUTTON_L;
+  if(pad.wButtons&XINPUT_GAMEPAD_RIGHT_SHOULDER)b|=EF_BUTTON_R;
+  return b;
+}
 void tick(){if(status!=EF_STATUS_RUNNING)return;auto now=std::chrono::steady_clock::now();if(previous_tick.time_since_epoch().count())frame_accum+=std::chrono::duration<double>(now-previous_tick).count();previous_tick=now;frame_accum=std::min(frame_accum,0.1);int frames=0;
-  while((settings.frame_limit?frame_accum>=1.0/59.7275:frames==0)&&frames<3){EF_InputState input{};input.buttons=keyboard_buttons();ef_set_input(emulator,&input);if(ef_run_frame(emulator)!=EF_OK){status=EF_STATUS_PAUSED;break;}if(settings.frame_limit)frame_accum-=1.0/59.7275;frames++;}
+  while((settings.frame_limit?frame_accum>=1.0/59.7275:frames==0)&&frames<3){EF_InputState input{};input.buttons=keyboard_buttons()|controller_buttons();ef_set_input(emulator,&input);if(ef_run_frame(emulator)!=EF_OK){status=EF_STATUS_PAUSED;break;}if(settings.frame_limit)frame_accum-=1.0/59.7275;frames++;}
   if(frames){ef_get_video_info(emulator,&video);size_t required=0;ef_copy_video(emulator,nullptr,0,&required);rgba.resize(required);if(ef_copy_video(emulator,rgba.data(),rgba.size(),nullptr)==EF_OK){bgra.resize(required);for(size_t i=0;i+3<required;i+=4){bgra[i]=rgba[i+2];bgra[i+1]=rgba[i+1];bgra[i+2]=rgba[i];bgra[i+3]=0;}InvalidateRect(window_handle,nullptr,FALSE);}refresh_status();}
   pump_audio();
 }

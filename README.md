@@ -14,7 +14,7 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Run `build/Release/EmuFrameTestHost.exe`. Open a `.gb`, `.gbc`, or `.gba` file through File > Open ROM. Use arrow keys for the D-pad, Z/X for A/B, Enter/Backspace for Start/Select, and A/S for L/R. Emulation menu has pause, resume, reset, and save/load state slot 0. The Debug menu shows metadata, backend, performance, and logs.
+Run `build/Release/EmuFrameTestHost.exe`. Open a `.gb`, `.gbc`, or `.gba` file through File > Open ROM. Use arrow keys for the D-pad, Z/X for A/B, Enter/Backspace for Start/Select, and A/S for L/R. The first XInput controller also works: D-pad or left stick for movement, A/B, Start/Back, and shoulder buttons for L/R. Keyboard and controller buttons are combined. Emulation menu has pause, resume, reset, and save/load state slot 0. The Debug menu shows metadata, backend, performance, and logs.
 
 On first launch, the host creates `emuframe.ini` beside the EXE. Use Settings > Open Settings File to edit it and Settings > Reload Settings to apply audio, pacing, scaling, and window changes. `data_directory` changes after restarting the host. An [example settings file](apps/test_host/emuframe.ini.example) lists every option. `volume` accepts 0–2, `audio_latency_ms` accepts 40–250, and `max_audio_backlog_ms` accepts 40–500. The host logs audio-device errors and discards old audio if its queue grows beyond the configured limit.
 
