@@ -4,4 +4,4 @@
 
 The mGBA adapter uses `mCoreFind` to validate a ROM and choose mGBA's GB or GBA core. GBC is handled by mGBA's GB core according to the cartridge header. Key bit positions match mGBA's A/B/Select/Start/Right/Left/Up/Down/R/L mask. The adapter uses the software framebuffer and mGBA's audio buffer. It passes a per-hash cartridge save path to `mCoreLoadSaveFile` and uses named VFiles for save states.
 
-To add a backend later, implement the generic interface, add a factory/registration rule, and extend system detection. The host ABI can remain unchanged. External process backends can copy frames and audio into the same generic contract without exposing process handles to hosts.
+To add a backend later, implement or adapt the internal interface and add a factory/registration rule. Backends with different media, firmware, input, or storage needs will also require versioned public API extensions; the current ROM and GB input contract alone is insufficient. External process backends can copy frames and audio into the generic output contract without exposing process handles to hosts.

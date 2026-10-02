@@ -2,6 +2,8 @@
 
 **In development:** EmuFrame is an early test framework, not a finished emulator release. It is a small C ABI around an mGBA backend for user-provided Game Boy, Game Boy Color, and Game Boy Advance ROMs. The framework owns emulation, input routing, video/audio buffers, save paths, and save states. Hosts render and play the output themselves.
 
+EmuFrame is intended to support more emulator backends over time, including PlayStation and Xbox systems. Version 0.1 only supports GB, GBC, and GBA; the future systems will need their own backends and API extensions for media, firmware, controllers, and storage.
+
 ## Build (Windows x64)
 
 Use CMake 3.20+ and a C++20 compiler. mGBA is pinned as a Git submodule at `Emulator Master Folders/mgba-master/` and built as a static dependency. Clone with `git clone --recurse-submodules https://github.com/AC9892/EmuFrameWork.git`, or run `git submodule update --init --recursive` after an ordinary clone. No ROMs or firmware are downloaded. If you keep mGBA elsewhere, set `-DEF_MGBA_SOURCE_DIR="<path to mGBA source>"` when configuring CMake.
