@@ -8,7 +8,7 @@ struct TestHostSettings {
   bool frame_limit=true;
   bool integer_scaling=true;
   bool preserve_aspect_ratio=true;
-  int audio_latency_ms=80;
+  int audio_latency_ms=120;
   int max_audio_backlog_ms=120;
   int window_width=760;
   int window_height=560;
