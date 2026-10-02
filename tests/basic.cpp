@@ -1,6 +1,7 @@
 #include <emuframe/emuframe.h>
 #include "../apps/test_host/settings.hpp"
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -15,7 +16,7 @@ int main(){
   check(ef_api_version()==EF_API_VERSION,"API version");
   check(ef_run_frame(999999)==EF_ERROR_INVALID_HANDLE,"invalid handle");
   EF_Handle a=0,b=0;EF_Config c{};c.struct_size=sizeof c;c.audio_enabled=1;c.volume=1;
-  auto root=std::filesystem::temp_directory_path()/"EmuFrameTestData";
+  auto root=std::filesystem::temp_directory_path()/("EmuFrameTestData-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
   std::error_code ec;std::filesystem::create_directories(root,ec);auto data=(root/"data").string();c.data_directory=data.c_str();
   std::string warning;auto settings_file=root/"emuframe.ini";auto settings=load_settings(settings_file,warning);
   check(std::filesystem::exists(settings_file)&&settings.audio_enabled&&settings.integer_scaling,"settings creation");
@@ -59,6 +60,10 @@ int main(){
     check(ef_pause(a)==EF_OK,"pause");check(ef_run_frame(a)==EF_ERROR_BAD_STATE,"frame while paused");
     check(ef_resume(a)==EF_OK,"resume");check(ef_reset(a)==EF_OK,"reset");
     check(ef_close_rom(a)==EF_OK,"close ROM");
+    check(ef_load_rom(a,path.c_str())==EF_OK,"reopen GBA for saved state");
+    check(ef_load_state(a,0)==EF_OK,"load state after reopening GBA");
+    check(ef_start(a)==EF_OK&&ef_run_frame(a)==EF_OK,"run restored GBA state");
+    check(ef_close_rom(a)==EF_OK,"close restored GBA");
   }
   for(int color=0;color<2;color++){
     std::vector<unsigned char> gb(0x8000);
@@ -72,6 +77,45 @@ int main(){
     if(loaded!=EF_OK){char detail[256]{};ef_get_last_error(a,detail,sizeof detail);std::fprintf(stderr,"GB load: %s\n",detail);}
     check(loaded==EF_OK,color?"load synthetic GBC":"load synthetic GB");
     if(loaded==EF_OK){EF_GameInfo game{};ef_get_game_info(a,&game);check(game.system==(color?EF_SYSTEM_GBC:EF_SYSTEM_GB),"GB system detection");ef_start(a);check(ef_run_frame(a)==EF_OK,"GB run frame");EF_VideoFrame vf{};ef_get_video_info(a,&vf);check(vf.width==160&&vf.height==144,"GB video dimensions");ef_close_rom(a);}
+  }
+  /* Battery-backed MBC1 ROM: first session writes 0x5A to SRAM; after
+     reopening, the ROM observes it and writes 0xC3 to the next byte. */
+  {
+    std::vector<unsigned char> gb(0x8000);
+    gb[0x100]=0xC3;gb[0x101]=0x50;gb[0x102]=0x01;
+    gb[0x104]=0xCE;gb[0x105]=0xED;gb[0x106]=0x66;gb[0x107]=0x66;
+    std::memcpy(gb.data()+0x134,"EMUFRAME SAVE",13);
+    gb[0x147]=0x03; /* MBC1 + RAM + battery */
+    gb[0x149]=0x02; /* 8 KiB RAM */
+    const unsigned char program[]={
+      0x3E,0x0A,0xEA,0x00,0x00, /* enable cartridge RAM */
+      0xFA,0x00,0xA0,           /* read saved marker */
+      0xFE,0x5A,0x28,0x07,      /* branch if marker persisted */
+      0x3E,0x5A,0xEA,0x00,0xA0,0x18,0xFE,
+      0x3E,0xC3,0xEA,0x01,0xA0,0x18,0xFE
+    };
+    std::memcpy(gb.data()+0x150,program,sizeof program);
+    auto gbpath=root/"battery.gb";
+    {std::ofstream out(gbpath,std::ios::binary|std::ios::trunc);out.write((char*)gb.data(),gb.size());}
+    auto gbname=gbpath.string();
+    auto saved_byte=[&](const std::filesystem::path& save,size_t offset){
+      std::ifstream in(save,std::ios::binary);if(!in)return -1;
+      in.seekg(std::streamoff(offset));return in.get();
+    };
+    if(ef_load_rom(a,gbname.c_str())==EF_OK){
+      EF_GameInfo game{};check(ef_get_game_info(a,&game)==EF_OK,"battery game info");
+      auto save=root/"data"/"saves"/game.sha256/"game.sav";
+      check(ef_start(a)==EF_OK,"start battery ROM");
+      for(int i=0;i<3;i++)check(ef_run_frame(a)==EF_OK,"run battery ROM");
+      check(ef_close_rom(a)==EF_OK,"close battery ROM");
+      check(saved_byte(save,0)==0x5A,"cartridge save written to disk");
+      check(saved_byte(save,1)!=0xC3,"second-session marker absent before reopen");
+      check(ef_load_rom(a,gbname.c_str())==EF_OK,"reopen battery ROM");
+      check(ef_start(a)==EF_OK,"restart battery ROM");
+      for(int i=0;i<3;i++)check(ef_run_frame(a)==EF_OK,"run reopened battery ROM");
+      check(ef_close_rom(a)==EF_OK,"close reopened battery ROM");
+      check(saved_byte(save,1)==0xC3,"cartridge save restored after reopening");
+    }else check(false,"load battery ROM");
   }
   ef_destroy_instance(a);check(ef_get_status(a,&status)==EF_ERROR_INVALID_HANDLE,"stale handle");
   ef_destroy_instance(b);std::filesystem::remove_all(root,ec);
