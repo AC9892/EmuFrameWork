@@ -9,7 +9,7 @@ struct TestHostSettings {
   bool integer_scaling=true;
   bool preserve_aspect_ratio=true;
   int audio_latency_ms=120;
-  int max_audio_backlog_ms=120;
+  int max_audio_backlog_ms=250;
   int window_width=760;
   int window_height=560;
   std::string data_directory="EmuFrameData";

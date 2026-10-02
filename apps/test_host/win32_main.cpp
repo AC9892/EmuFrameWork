@@ -132,11 +132,6 @@ uint32_t controller_buttons(){
 }
 void tick(){if(status!=EF_STATUS_RUNNING)return;auto now=std::chrono::steady_clock::now();if(previous_tick.time_since_epoch().count())frame_accum+=std::chrono::duration<double>(now-previous_tick).count();previous_tick=now;frame_accum=std::min(frame_accum,0.1);int frames=0;
   pump_audio();
-  EF_AudioInfo queued{};
-  if(settings.frame_limit&&audio_device&&ef_get_audio_info(emulator,&queued)==EF_OK){
-    const size_t high_water=size_t(queued.sample_rate)*settings.max_audio_backlog_ms/1500;
-    if(queued.available_frames>high_water){frame_accum=0;return;}
-  }
   while((settings.frame_limit?frame_accum>=1.0/59.7275:frames==0)&&frames<3){EF_InputState input{};if(GetForegroundWindow()==window_handle)input.buttons=keyboard_buttons()|controller_buttons();ef_set_input(emulator,&input);if(ef_run_frame(emulator)!=EF_OK){status=EF_STATUS_PAUSED;break;}if(settings.frame_limit)frame_accum-=1.0/59.7275;frames++;}
   if(frames){EF_VideoFrame next{};size_t required=0;if(ef_get_video_info(emulator,&next)==EF_OK&&ef_copy_video(emulator,nullptr,0,&required)==EF_ERROR_BUFFER_TOO_SMALL&&required){rgba.resize(required);if(ef_copy_video(emulator,rgba.data(),rgba.size(),nullptr)==EF_OK){video=next;bgra.resize(required);for(size_t i=0;i+3<required;i+=4){bgra[i]=rgba[i+2];bgra[i+1]=rgba[i+1];bgra[i+2]=rgba[i];bgra[i+3]=0;}InvalidateRect(window_handle,nullptr,FALSE);}else log_line(EF_LOG_ERROR,"Video copy failed; keeping previous frame",nullptr);}refresh_status();}
   pump_audio();
