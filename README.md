@@ -28,4 +28,4 @@ mGBA is licensed under the Mozilla Public License 2.0; its source and license ar
 
 See [architecture](docs/ARCHITECTURE.md), [host integration](docs/HOST_INTEGRATION.md), and [backend notes](docs/BACKENDS.md).
 
-Optional local Game Boy, Game Boy Color, and Game Boy Advance models are not included in this public repository. Their creators and licenses are listed in [model credits](docs/MODEL_CREDITS.md). The Game Boy model uses CC BY-NC 4.0, the Game Boy Color model uses CC BY 4.0, and the GBA listing identifies an Editorial License (no AI). Check those terms before distributing the models.
+Optional local Game Boy, Game Boy Color, and Game Boy Advance models are not included in this public repository. [Model credits](docs/MODEL_CREDITS.md) link to the creators' original downloads and licenses. Some local copies have been modified, so the originals may look different. The Game Boy model uses CC BY-NC 4.0, the Game Boy Color model uses CC BY 4.0, and the GBA listing identifies an Editorial License (no AI). Check those terms before distributing the models.
