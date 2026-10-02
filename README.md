@@ -20,7 +20,7 @@ On first launch, the host creates `emuframe.ini` beside the EXE. Use Settings > 
 
 The build produces `EmuFrameCore.dll` and `EmuFrameCore.lib` next to the test host. The C header is `include/emuframe/emuframe.h`. Other hosts can link the import library or load the DLL dynamically.
 
-The test host uses Win32 and waveOut; the core uses standard C++ facilities and is intended to remain portable. The current build has been verified with the Visual Studio 2019 toolchain. The API and generated ROM tests pass, including battery-backed cartridge save persistence across close/reopen and save-state loading after reopen. A user recording shows game video. Broader testing with real games and audio devices is still needed. A functional ROM session needs a ROM supplied by the user; no ROM is included here.
+The test host uses Win32 and waveOut; the core uses standard C++ facilities and is intended to remain portable. The current build has been verified with the Visual Studio 2019 toolchain. The API and generated ROM tests pass, including independent simultaneous instances, battery-backed cartridge save persistence across close/reopen, and save-state loading after reopen. A user recording shows game video. Broader testing with real games, controllers, and audio devices is still needed. A functional ROM session needs a ROM supplied by the user; no ROM is included here.
 
 ## Data and licensing
 

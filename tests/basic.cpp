@@ -40,6 +40,8 @@ int main(){
   if(load!=EF_OK){char detail[256]{};ef_get_last_error(a,detail,sizeof detail);std::fprintf(stderr,"ROM load: %s\n",detail);}
   check(load==EF_OK,"load synthetic GBA");
   if(load==EF_OK){
+    check(ef_load_rom(b,path.c_str())==EF_OK,"load second GBA instance");
+    check(ef_start(b)==EF_OK&&ef_run_frame(b)==EF_OK,"run second GBA instance");
     EF_GameInfo game{};check(ef_get_game_info(a,&game)==EF_OK&&game.system==EF_SYSTEM_GBA&&std::strcmp(game.sha256,"2be471b6a74b267a0de2743859c347247911f6da9e7641ce8fdda67b5249d5f5")==0,"game metadata and SHA-256");
     int scanned=0;size_t found=0;auto root_path=root.string();
     check(ef_scan_library(root_path.c_str(),count_game,&scanned,&found)==EF_OK&&scanned==1&&found==1,"library scan");
@@ -58,8 +60,11 @@ int main(){
     check(ef_set_audio_options(a,1,3.0f)==EF_ERROR_INVALID_ARGUMENT,"reject invalid volume");
     check(ef_save_state(a,0)==EF_OK,"save state");check(ef_load_state(a,0)==EF_OK,"load state");
     check(ef_pause(a)==EF_OK,"pause");check(ef_run_frame(a)==EF_ERROR_BAD_STATE,"frame while paused");
+    check(ef_run_frame(b)==EF_OK,"second instance runs while first is paused");
     check(ef_resume(a)==EF_OK,"resume");check(ef_reset(a)==EF_OK,"reset");
     check(ef_close_rom(a)==EF_OK,"close ROM");
+    check(ef_run_frame(b)==EF_OK,"second instance runs after first closes");
+    check(ef_close_rom(b)==EF_OK,"close second GBA instance");
     check(ef_load_rom(a,path.c_str())==EF_OK,"reopen GBA for saved state");
     check(ef_load_state(a,0)==EF_OK,"load state after reopening GBA");
     check(ef_start(a)==EF_OK&&ef_run_frame(a)==EF_OK,"run restored GBA state");
@@ -74,6 +79,7 @@ int main(){
     auto gbpath=root/(color?"loop.gbc":"loop.gb");
     {std::ofstream out(gbpath,std::ios::binary|std::ios::trunc);out.write((char*)gb.data(),gb.size());}
     auto gbname=gbpath.string();auto loaded=ef_load_rom(a,gbname.c_str());
+    check(ef_load_rom(b,gbname.c_str())==EF_ERROR_UNSUPPORTED_SYSTEM,"preferred GBA rejects GB cartridge");
     if(loaded!=EF_OK){char detail[256]{};ef_get_last_error(a,detail,sizeof detail);std::fprintf(stderr,"GB load: %s\n",detail);}
     check(loaded==EF_OK,color?"load synthetic GBC":"load synthetic GB");
     if(loaded==EF_OK){EF_GameInfo game{};ef_get_game_info(a,&game);check(game.system==(color?EF_SYSTEM_GBC:EF_SYSTEM_GB),"GB system detection");ef_start(a);check(ef_run_frame(a)==EF_OK,"GB run frame");EF_VideoFrame vf{};ef_get_video_info(a,&vf);check(vf.width==160&&vf.height==144,"GB video dimensions");ef_close_rom(a);}
