@@ -80,9 +80,10 @@ void set_controller_source(const std::string& source){
   log_line(EF_LOG_INFO,(source.empty()?"Controller disconnected":"Controller detected: "+source).c_str(),nullptr);
 }
 uint32_t controller_buttons(){
-  XINPUT_STATE state{};uint32_t b=0;
-  if(XInputGetState(0,&state)==ERROR_SUCCESS){
-    set_controller_source("XInput controller 1");
+  XINPUT_STATE state{};uint32_t b=0;DWORD xinput_id=0;
+  for(;xinput_id<XUSER_MAX_COUNT;++xinput_id)if(XInputGetState(xinput_id,&state)==ERROR_SUCCESS)break;
+  if(xinput_id<XUSER_MAX_COUNT){
+    set_controller_source("XInput controller "+std::to_string(xinput_id+1));
     const auto& pad=state.Gamepad;
     if(pad.wButtons)last_controller_event="XInput button mask: "+std::to_string(pad.wButtons);
     if((pad.wButtons&XINPUT_GAMEPAD_DPAD_UP)||pad.sThumbLY>XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE)b|=EF_BUTTON_UP;
