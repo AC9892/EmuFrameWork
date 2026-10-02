@@ -1,0 +1,9 @@
+build/
+EmuFrameData/
+*.user
+Models/
+emuframe.ini
+.scratch/
+*.gb
+*.gbc
+*.gba
