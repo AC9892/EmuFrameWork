@@ -58,6 +58,8 @@ int main(){
     check(ef_read_audio(a,pcm.data(),2048,&audio_frames)==EF_OK&&audio_frames>0,"audio read");
     check(ef_set_audio_options(a,1,0.5f)==EF_OK,"change audio options");
     check(ef_set_audio_options(a,1,3.0f)==EF_ERROR_INVALID_ARGUMENT,"reject invalid volume");
+    for(int i=0;i<15;i++)check(ef_run_frame(a)==EF_OK,"fill backend audio buffer");
+    EF_AudioInfo buffered{};check(ef_get_audio_info(a,&buffered)==EF_OK&&buffered.available_frames>4096,"audio buffer holds more than 125 ms");
     check(ef_save_state(a,0)==EF_OK,"save state");check(ef_load_state(a,0)==EF_OK,"load state");
     check(ef_pause(a)==EF_OK,"pause");check(ef_run_frame(a)==EF_ERROR_BAD_STATE,"frame while paused");
     check(ef_run_frame(b)==EF_OK,"second instance runs while first is paused");

@@ -22,7 +22,7 @@ public:
     mCoreInitConfig(core_,"EmuFrame");
     if(!core_->init(core_)){core_=nullptr;return false;}
     core_->setVideoBuffer(core_,pixels_.data(),256);
-    core_->setAudioBufferSize(core_,4096);
+    core_->setAudioBufferSize(core_,32768);
     if(!mCoreLoadFile(core_,rp.c_str()))return false;
     if(!mCoreLoadSaveFile(core_,sp.c_str(),false))return false;
     core_->reset(core_);
