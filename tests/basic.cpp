@@ -53,7 +53,7 @@ int main(){
     EF_VideoFrame frame{};check(ef_get_video_info(a,&frame)==EF_OK&&frame.width==240&&frame.height==160,"video info");
     size_t bytes=0;check(ef_copy_video(a,nullptr,0,&bytes)==EF_ERROR_BUFFER_TOO_SMALL&&bytes>=frame.pitch*frame.height,"video size");
     std::vector<unsigned char> pixels(bytes);check(ef_copy_video(a,pixels.data(),pixels.size(),nullptr)==EF_OK,"video copy");
-    EF_AudioInfo audio{};check(ef_get_audio_info(a,&audio)==EF_OK&&audio.channels>0&&audio.sample_rate>0,"audio info");
+    EF_AudioInfo audio{};check(ef_get_audio_info(a,&audio)==EF_OK&&audio.channels==2&&audio.sample_rate==44100,"resampled stereo audio info");
     std::vector<int16_t> pcm(2048*audio.channels);size_t audio_frames=0;
     check(ef_read_audio(a,pcm.data(),2048,&audio_frames)==EF_OK&&audio_frames>0,"audio read");
     check(ef_set_audio_options(a,1,0.5f)==EF_OK,"change audio options");

@@ -32,6 +32,11 @@ struct AudioBlock {WAVEHDR hdr{};std::vector<int16_t> samples;bool prepared=fals
 std::array<AudioBlock,4> audio_blocks{};
 std::thread audio_worker;
 std::atomic<bool> audio_running=false;
+std::atomic<bool> audio_clock_valid=false;
+std::atomic<uint32_t> audio_clock_generation=0;
+std::atomic<uint32_t> audio_clock_rate=0;
+std::atomic<uint32_t> audio_clock_lead=0;
+std::atomic<uint64_t> audio_played_frames=0;
 std::thread emulation_worker;
 std::atomic<bool> emulation_running=false;
 std::atomic<bool> frame_limit_enabled=true;
@@ -59,7 +64,7 @@ void show_log_file(){
 }
 void error_box(EF_Result result){char msg[512]{};ef_get_last_error(emulator,msg,sizeof(msg));std::string text=msg[0]?msg:ef_result_string(result);MessageBoxA(window_handle,text.c_str(),"EmuFrame error",MB_OK|MB_ICONERROR);}
 void pump_audio();
-void close_audio(){audio_running.store(false);if(audio_worker.joinable())audio_worker.join();audio_primed=false;if(!audio_device)return;waveOutReset(audio_device);for(auto& b:audio_blocks){if(b.prepared){waveOutUnprepareHeader(audio_device,&b.hdr,sizeof b.hdr);b.prepared=false;}}waveOutClose(audio_device);audio_device=nullptr;}
+void close_audio(){audio_running.store(false);if(audio_worker.joinable())audio_worker.join();audio_clock_valid.store(false);audio_clock_generation.fetch_add(1);audio_primed=false;if(!audio_device)return;waveOutReset(audio_device);for(auto& b:audio_blocks){if(b.prepared){waveOutUnprepareHeader(audio_device,&b.hdr,sizeof b.hdr);b.prepared=false;}}waveOutClose(audio_device);audio_device=nullptr;}
 void open_audio(){close_audio();if(!settings.audio_enabled)return;EF_AudioInfo info{};if(ef_get_audio_info(emulator,&info)!=EF_OK||!info.channels||!info.sample_rate)return;
   audio_format={};audio_format.wFormatTag=WAVE_FORMAT_PCM;audio_format.nChannels=WORD(info.channels);audio_format.nSamplesPerSec=info.sample_rate;audio_format.wBitsPerSample=16;audio_format.nBlockAlign=WORD(info.channels*2);audio_format.nAvgBytesPerSec=info.sample_rate*audio_format.nBlockAlign;
   auto result=waveOutOpen(&audio_device,WAVE_MAPPER,&audio_format,0,0,CALLBACK_NULL);
@@ -68,11 +73,22 @@ void open_audio(){close_audio();if(!settings.audio_enabled)return;EF_AudioInfo i
   for(auto& b:audio_blocks){b.samples.resize(frames_per_block*info.channels);b.hdr={};b.hdr.lpData=(LPSTR)b.samples.data();b.hdr.dwBufferLength=DWORD(b.samples.size()*2);b.prepared=false;}
   audio_backlog_ms=settings.max_audio_backlog_ms;
   log_line(EF_LOG_INFO,("Audio opened: "+std::to_string(info.sample_rate)+" Hz, "+std::to_string(info.channels)+" channels").c_str(),nullptr);
+  audio_clock_rate.store(info.sample_rate);audio_clock_lead.store(DWORD(frames_per_block*audio_blocks.size()));audio_played_frames.store(0);
   audio_running.store(true);
   audio_worker=std::thread([]{while(audio_running.load()){pump_audio();std::this_thread::sleep_for(std::chrono::milliseconds(4));}});
 }
 void pump_audio(){
   EF_AudioInfo info{};if(ef_get_audio_info(emulator,&info)!=EF_OK||!info.channels)return;
+  if(audio_device){MMTIME position{};position.wType=TIME_SAMPLES;
+    if(waveOutGetPosition(audio_device,&position,sizeof position)==MMSYSERR_NOERROR){
+      uint64_t played=0;bool supported=true;
+      if(position.wType==TIME_SAMPLES)played=position.u.sample;
+      else if(position.wType==TIME_MS)played=uint64_t(position.u.ms)*audio_format.nSamplesPerSec/1000;
+      else if(position.wType==TIME_BYTES)played=position.u.cb/audio_format.nBlockAlign;
+      else supported=false;
+      if(supported){audio_played_frames.store(played);if(!audio_clock_valid.load()){audio_clock_generation.fetch_add(1);audio_clock_valid.store(true);log_line(EF_LOG_INFO,"Audio playback clock active",nullptr);}}
+    }
+  }
   size_t keep=audio_device?size_t(info.sample_rate)*audio_backlog_ms/1000:0;
   size_t dropped=0;static std::vector<int16_t> discard;discard.resize(4096*info.channels);
   while(info.available_frames>keep){size_t count=0;auto want=std::min<size_t>(4096,info.available_frames-keep);if(ef_read_audio(emulator,discard.data(),want,&count)!=EF_OK||!count)break;dropped+=count;if(ef_get_audio_info(emulator,&info)!=EF_OK)break;}
@@ -94,15 +110,23 @@ void stop_emulation(){emulation_running.store(false);if(emulation_worker.joinabl
 void start_emulation(){stop_emulation();frame_limit_enabled.store(settings.frame_limit);emulation_running.store(true);
   emulation_worker=std::thread([]{
     auto previous=std::chrono::steady_clock::now();double accumulated=0;
+    uint64_t frames_run=0,clock_base=0;uint32_t observed_clock=0;bool was_audio_clock=false;
     std::vector<uint8_t> pixels,converted;unsigned dark_run=0;
     while(emulation_running.load()){
       auto now=std::chrono::steady_clock::now();accumulated=std::min(0.1,accumulated+std::chrono::duration<double>(now-previous).count());previous=now;
       int frames=0;const bool limited=frame_limit_enabled.load();
-      while(emulation_running.load()&&(limited?accumulated>=1.0/59.7275:frames==0)&&frames<3){
+      const unsigned rate=audio_clock_rate.load();const bool use_audio_clock=limited&&rate&&audio_clock_valid.load();
+      if(use_audio_clock){const auto generation=audio_clock_generation.load();if(generation!=observed_clock||!was_audio_clock){observed_clock=generation;clock_base=frames_run;}accumulated=0;}
+      else if(was_audio_clock)accumulated=0;
+      was_audio_clock=use_audio_clock;
+      const double target=use_audio_clock?clock_base+double(audio_played_frames.load()+audio_clock_lead.load())*59.7275/rate:0;
+      while(emulation_running.load()&&(limited?(use_audio_clock?double(frames_run)<target:accumulated>=1.0/59.7275):frames==0)&&frames<3){
         EF_InputState input{};if(GetForegroundWindow()==window_handle)input.buttons=keyboard_buttons()|controller_input.load();
         ef_set_input(emulator,&input);
         if(ef_run_frame(emulator)!=EF_OK){emulation_running.store(false);PostMessageW(window_handle,WM_APP+1,0,0);break;}
-        if(limited)accumulated-=1.0/59.7275;
+        if(limited&&!use_audio_clock)accumulated-=1.0/59.7275;
+        ++frames_run;
+        if(frames_run==180){EF_Performance p{};if(ef_get_performance(emulator,&p)==EF_OK)log_line(EF_LOG_INFO,(std::string(use_audio_clock?"Audio-clock":"Wall-clock")+" pacing: "+std::to_string(p.emulated_fps)+" FPS").c_str(),nullptr);}
         ++frames;
       }
       if(frames){EF_VideoFrame next{};size_t required=0;
@@ -123,8 +147,9 @@ void start_emulation(){stop_emulation();frame_limit_enabled.store(settings.frame
   });
 }
 void close_rom(){stop_emulation();close_audio();ef_close_rom(emulator);status=EF_STATUS_EMPTY;{std::lock_guard lock(video_mutex);video={};bgra.clear();}InvalidateRect(window_handle,nullptr,TRUE);refresh_status();}
+void load_rom_path(const wchar_t* filename){close_rom();auto path=utf8(filename);auto r=ef_load_rom(emulator,path.c_str());if(r!=EF_OK){error_box(r);return;}r=ef_start(emulator);if(r!=EF_OK){error_box(r);close_rom();return;}status=EF_STATUS_RUNNING;open_audio();start_emulation();refresh_status();}
 void open_rom(){wchar_t filename[MAX_PATH]{};OPENFILENAMEW dialog{};dialog.lStructSize=sizeof dialog;dialog.hwndOwner=window_handle;dialog.lpstrFilter=L"Game Boy ROMs (*.gb;*.gbc;*.gba)\0*.gb;*.gbc;*.gba\0All files (*.*)\0*.*\0";dialog.lpstrFile=filename;dialog.nMaxFile=MAX_PATH;dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
-  if(!GetOpenFileNameW(&dialog))return;close_rom();auto path=utf8(filename);auto r=ef_load_rom(emulator,path.c_str());if(r!=EF_OK){error_box(r);return;}r=ef_start(emulator);if(r!=EF_OK){error_box(r);close_rom();return;}status=EF_STATUS_RUNNING;open_audio();start_emulation();refresh_status();}
+  if(GetOpenFileNameW(&dialog))load_rom_path(filename);}
 void reload_settings(){std::string warning;auto updated=load_settings(config_path,warning);auto new_data=data_dir_for(updated);settings=updated;
   frame_limit_enabled.store(settings.frame_limit);
   ef_set_audio_options(emulator,settings.audio_enabled?1:0,settings.volume);
@@ -200,6 +225,12 @@ void tick(){if(status!=EF_STATUS_RUNNING)return;
   if(now-last_status>=std::chrono::milliseconds(250)){refresh_status();last_status=now;}
   if(!audio_device)pump_audio();
 }
+EF_Result reset_or_restore(bool restore){const bool running=status==EF_STATUS_RUNNING;
+  if(running){stop_emulation();close_audio();}
+  auto result=restore?ef_load_state(emulator,0):ef_reset(emulator);
+  if(running){open_audio();start_emulation();}
+  return result;
+}
 HMENU make_menu(){auto root=CreateMenu(),file=CreatePopupMenu(),emu=CreatePopupMenu(),debug=CreatePopupMenu(),options=CreatePopupMenu();AppendMenuW(file,MF_STRING,ID_OPEN,L"Open ROM...");AppendMenuW(file,MF_STRING,ID_CLOSE,L"Close ROM");AppendMenuW(file,MF_SEPARATOR,0,nullptr);AppendMenuW(file,MF_STRING,ID_EXIT,L"Exit");AppendMenuW(emu,MF_STRING,ID_PAUSE,L"Pause");AppendMenuW(emu,MF_STRING,ID_RESUME,L"Resume");AppendMenuW(emu,MF_STRING,ID_RESET,L"Reset");AppendMenuW(emu,MF_SEPARATOR,0,nullptr);AppendMenuW(emu,MF_STRING,ID_SAVE,L"Save State (slot 0)");AppendMenuW(emu,MF_STRING,ID_LOAD,L"Load State (slot 0)");AppendMenuW(options,MF_STRING,ID_OPEN_SETTINGS,L"Open Settings File");AppendMenuW(options,MF_STRING,ID_RELOAD_SETTINGS,L"Reload Settings");AppendMenuW(debug,MF_STRING,ID_INFO,L"Game Info");AppendMenuW(debug,MF_STRING,ID_BACKEND,L"Backend Info");AppendMenuW(debug,MF_STRING,ID_PERF,L"Performance");AppendMenuW(debug,MF_STRING,ID_CONTROLLER,L"Controller Info");AppendMenuW(debug,MF_STRING,ID_LOGS,L"Open Log File");AppendMenuW(root,MF_POPUP,(UINT_PTR)file,L"File");AppendMenuW(root,MF_POPUP,(UINT_PTR)emu,L"Emulation");AppendMenuW(root,MF_POPUP,(UINT_PTR)options,L"Settings");AppendMenuW(root,MF_POPUP,(UINT_PTR)debug,L"Debug");return root;}
 LRESULT CALLBACK wndproc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){switch(msg){
 case WM_CREATE:window_handle=hwnd;SetMenu(hwnd,make_menu());SetTimer(hwnd,1,8,nullptr);refresh_status();return 0;
@@ -207,7 +238,7 @@ case WM_ACTIVATEAPP:if(!w){EF_InputState released{};ef_set_input(emulator,&relea
 case WM_ENTERSIZEMOVE:controller_input.store(0);return 0;
 case WM_MOVING:case WM_SIZING:RedrawWindow(hwnd,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);return TRUE;
 case WM_TIMER:tick();return 0;
-case WM_COMMAND:{EF_Result r=EF_OK;switch(LOWORD(w)){case ID_OPEN:open_rom();break;case ID_CLOSE:close_rom();break;case ID_EXIT:DestroyWindow(hwnd);break;case ID_PAUSE:stop_emulation();r=ef_pause(emulator);if(r==EF_OK){status=EF_STATUS_PAUSED;close_audio();}break;case ID_RESUME:r=ef_resume(emulator);if(r==EF_OK){status=EF_STATUS_RUNNING;open_audio();start_emulation();}break;case ID_RESET:r=ef_reset(emulator);break;case ID_SAVE:r=ef_save_state(emulator,0);break;case ID_LOAD:r=ef_load_state(emulator,0);break;case ID_OPEN_SETTINGS:if((INT_PTR)ShellExecuteW(hwnd,L"open",config_path.c_str(),nullptr,nullptr,SW_SHOWNORMAL)<=32)MessageBoxW(hwnd,L"Could not open emuframe.ini",L"Settings",MB_OK|MB_ICONERROR);break;case ID_RELOAD_SETTINGS:reload_settings();break;case ID_INFO:show_info();break;case ID_BACKEND:MessageBoxA(hwnd,ef_backend_name(),"Backend Info",MB_OK);break;case ID_PERF:show_performance();break;case ID_CONTROLLER:{controller_buttons();std::string info=controller_source.empty()?"No controller detected":controller_source;if(!last_controller_event.empty())info+="\nLast input: "+last_controller_event;MessageBoxA(hwnd,info.c_str(),"Controller Info",MB_OK);break;}case ID_LOGS:show_log_file();break;}if(r!=EF_OK)error_box(r);refresh_status();return 0;}
+case WM_COMMAND:{EF_Result r=EF_OK;switch(LOWORD(w)){case ID_OPEN:open_rom();break;case ID_CLOSE:close_rom();break;case ID_EXIT:DestroyWindow(hwnd);break;case ID_PAUSE:stop_emulation();r=ef_pause(emulator);if(r==EF_OK){status=EF_STATUS_PAUSED;close_audio();}break;case ID_RESUME:r=ef_resume(emulator);if(r==EF_OK){status=EF_STATUS_RUNNING;open_audio();start_emulation();}break;case ID_RESET:r=reset_or_restore(false);break;case ID_SAVE:r=ef_save_state(emulator,0);break;case ID_LOAD:r=reset_or_restore(true);break;case ID_OPEN_SETTINGS:if((INT_PTR)ShellExecuteW(hwnd,L"open",config_path.c_str(),nullptr,nullptr,SW_SHOWNORMAL)<=32)MessageBoxW(hwnd,L"Could not open emuframe.ini",L"Settings",MB_OK|MB_ICONERROR);break;case ID_RELOAD_SETTINGS:reload_settings();break;case ID_INFO:show_info();break;case ID_BACKEND:MessageBoxA(hwnd,ef_backend_name(),"Backend Info",MB_OK);break;case ID_PERF:show_performance();break;case ID_CONTROLLER:{controller_buttons();std::string info=controller_source.empty()?"No controller detected":controller_source;if(!last_controller_event.empty())info+="\nLast input: "+last_controller_event;MessageBoxA(hwnd,info.c_str(),"Controller Info",MB_OK);break;}case ID_LOGS:show_log_file();break;}if(r!=EF_OK)error_box(r);refresh_status();return 0;}
 case WM_APP+1:stop_emulation();close_audio();status=EF_STATUS_PAUSED;error_box(EF_ERROR_BACKEND_FAILURE);refresh_status();return 0;
 case WM_PAINT:{PAINTSTRUCT ps;auto dc=BeginPaint(hwnd,&ps);RECT rc;GetClientRect(hwnd,&rc);HBRUSH brush=CreateSolidBrush(RGB(25,25,28));FillRect(dc,&rc,brush);DeleteObject(brush);EF_VideoFrame current{};std::vector<uint8_t> pixels;{std::lock_guard lock(video_mutex);current=video;pixels=bgra;}if(current.width&&current.height&&!pixels.empty()){int aw=rc.right-rc.left,ah=rc.bottom-rc.top;int dw=aw,dh=ah;if(settings.preserve_aspect_ratio){double s=std::min(double(aw)/current.width,double(ah)/current.height);if(settings.integer_scaling&&s>=1)s=std::floor(s);dw=std::max(1,int(current.width*s));dh=std::max(1,int(current.height*s));}BITMAPINFO bmi{};bmi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bmi.bmiHeader.biWidth=int(current.pitch/4);bmi.bmiHeader.biHeight=-int(current.height);bmi.bmiHeader.biPlanes=1;bmi.bmiHeader.biBitCount=32;bmi.bmiHeader.biCompression=BI_RGB;SetStretchBltMode(dc,COLORONCOLOR);StretchDIBits(dc,(aw-dw)/2,(ah-dh)/2,dw,dh,0,0,current.width,current.height,pixels.data(),&bmi,DIB_RGB_COLORS,SRCCOPY);}else{SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(210,210,210));DrawTextW(dc,L"File > Open ROM to start",-1,&rc,DT_CENTER|DT_VCENTER|DT_SINGLELINE);}EndPaint(hwnd,&ps);return 0;}
 case WM_DESTROY:KillTimer(hwnd,1);stop_emulation();close_audio();log_line(EF_LOG_INFO,"Test host closing",nullptr);ef_destroy_instance(emulator);if(log_file)log_file.flush();timeEndPeriod(1);PostQuitMessage(0);return 0;
@@ -225,5 +256,6 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){
   ef_set_log_callback(emulator,log_line,nullptr);log_line(EF_LOG_INFO,"Test host started",nullptr);if(!warning.empty())log_line(EF_LOG_WARN,warning.c_str(),nullptr);
   WNDCLASSW cls{};cls.lpfnWndProc=wndproc;cls.hInstance=instance;cls.lpszClassName=L"EmuFrameTestHost";cls.hCursor=LoadCursor(nullptr,IDC_ARROW);RegisterClassW(&cls);
   auto hwnd=CreateWindowExW(0,cls.lpszClassName,L"EmuFrame Test Host",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,settings.window_width,settings.window_height,nullptr,nullptr,instance,nullptr);ShowWindow(hwnd,show);
+  int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);if(argv){if(argc==2)load_rom_path(argv[1]);LocalFree(argv);}
   MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}return int(msg.wParam);
 }
