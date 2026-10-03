@@ -72,6 +72,23 @@ int main(){
     check(ef_start(a)==EF_OK&&ef_run_frame(a)==EF_OK,"run restored GBA state");
     check(ef_close_rom(a)==EF_OK,"close restored GBA");
   }
+  /* A GBA game may switch SOUNDBIAS resolution at runtime, changing the
+     native mGBA sample rate while the output device remains at 44.1 kHz. */
+  {
+    auto rate_rom=rom;
+    const uint32_t instructions[]={0xE59F000C,0xE59F100C,0xE1C010B0,0xEAFFFFFE,0,0x04000088,0x00004200};
+    const uint32_t branch_to_code=0xEA000052;
+    std::memcpy(rate_rom.data(),&branch_to_code,sizeof branch_to_code);
+    std::memcpy(rate_rom.data()+0x150,instructions,sizeof instructions);
+    auto rate_path=root/"rate-change.gba";
+    {std::ofstream out(rate_path,std::ios::binary|std::ios::trunc);out.write((char*)rate_rom.data(),rate_rom.size());}
+    auto rate_name=rate_path.string();
+    check(ef_load_rom(a,rate_name.c_str())==EF_OK,"load GBA rate-change ROM");
+    check(ef_start(a)==EF_OK,"start GBA rate-change ROM");
+    for(int i=0;i<20;i++)check(ef_run_frame(a)==EF_OK,"run GBA rate-change frame");
+    EF_AudioInfo changed{};check(ef_get_audio_info(a,&changed)==EF_OK&&changed.sample_rate==44100&&changed.available_frames>13000&&changed.available_frames<17000,"GBA sample-rate change keeps 44.1 kHz output cadence");
+    check(ef_close_rom(a)==EF_OK,"close GBA rate-change ROM");
+  }
   for(int color=0;color<2;color++){
     std::vector<unsigned char> gb(0x8000);
     gb[0x100]=0xC3;gb[0x101]=0x50;gb[0x102]=0x01; /* jump to a harmless loop */

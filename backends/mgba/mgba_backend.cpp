@@ -49,7 +49,7 @@ public:
     frame_={w,h,256*4,EF_PIXEL_RGBA8888,0};return w>0&&h>0&&w<=256&&h<=224;
   }
   void reset() override {core_->reset(core_);reset_audio();frame_.sequence++;}
-  void run_frame() override {core_->runFrame(core_);mAudioResamplerProcess(&resampler_);unsigned w=0,h=0;core_->currentVideoSize(core_,&w,&h);frame_.width=w;frame_.height=h;frame_.sequence++;}
+  void run_frame() override {core_->runFrame(core_);mAudioResamplerSetSource(&resampler_,core_->getAudioBuffer(core_),core_->audioSampleRate(core_),true);mAudioResamplerProcess(&resampler_);unsigned w=0,h=0;core_->currentVideoSize(core_,&w,&h);frame_.width=w;frame_.height=h;frame_.sequence++;}
   void set_input(uint32_t bits) override {core_->setKeys(core_,bits&0x3ffu);}
   EF_VideoFrame video_info() const override {return frame_;}
   const uint32_t* video_pixels() const override {return pixels_.data();}
