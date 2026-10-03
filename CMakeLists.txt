@@ -29,6 +29,9 @@ set_target_properties(EmuFrameCore PROPERTIES OUTPUT_NAME EmuFrameCore)
 
 add_executable(EmuFrameEmbedExample examples/minimal_host.cpp)
 target_link_libraries(EmuFrameEmbedExample PRIVATE EmuFrameCore)
+if(WIN32)
+  target_link_libraries(EmuFrameEmbedExample PRIVATE comdlg32)
+endif()
 
 if(WIN32)
   add_executable(EmuFrameTestHost WIN32 apps/test_host/win32_main.cpp apps/test_host/settings.cpp)

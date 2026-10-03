@@ -2,14 +2,56 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <iterator>
+#include <string>
 #include <vector>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <commdlg.h>
+#endif
+
+namespace {
+#ifdef _WIN32
+std::string choose_rom() {
+  wchar_t path[32768]{};
+  OPENFILENAMEW dialog{};
+  dialog.lStructSize = sizeof(dialog);
+  dialog.lpstrFilter = L"Game Boy ROMs (*.gb;*.gbc;*.gba)\0*.gb;*.gbc;*.gba\0All files (*.*)\0*.*\0";
+  dialog.lpstrFile = path;
+  dialog.nMaxFile = static_cast<DWORD>(std::size(path));
+  dialog.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+  if (!GetOpenFileNameW(&dialog)) return {};
+  const int size = WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr);
+  if (size <= 1) return {};
+  std::string result(static_cast<std::size_t>(size), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, path, -1, result.data(), size, nullptr, nullptr);
+  result.pop_back();
+  return result;
+}
+#endif
+}
 
 // A console consumer of the public C ABI. A real host would upload pixels to a
 // texture, queue PCM to its audio device, and pace calls to ef_run_frame.
 int main(int argc, char** argv) {
-  if (argc != 2) {
+  if (argc > 2) {
     std::fprintf(stderr, "Usage: EmuFrameEmbedExample <path-to-your-rom>\n");
     return 2;
+  }
+  bool picked_rom = false;
+  std::string rom_path;
+  if (argc == 2) {
+    rom_path = argv[1];
+  } else {
+#ifdef _WIN32
+    rom_path = choose_rom();
+    if (rom_path.empty()) return 0; // The file picker was cancelled.
+    picked_rom = true;
+#else
+    std::fprintf(stderr, "Usage: EmuFrameEmbedExample <path-to-your-rom>\n");
+    return 2;
+#endif
   }
   if (ef_api_version() != EF_API_VERSION) {
     std::fprintf(stderr, "Unsupported EmuFrame API version\n");
@@ -42,7 +84,7 @@ int main(int argc, char** argv) {
   };
 
   do {
-    if (!check("Load ROM", ef_load_rom(emu, argv[1]))) break;
+    if (!check("Load ROM", ef_load_rom(emu, rom_path.c_str()))) break;
     EF_GameInfo game{};
     if (!check("Get game info", ef_get_game_info(emu, &game))) break;
     std::printf("%s (system %d, SHA-256 %s)\n", game.title,
@@ -95,5 +137,9 @@ int main(int argc, char** argv) {
   } while (false);
 
   ef_destroy_instance(emu);
+  if (picked_rom) {
+    std::puts("Press Enter to close this integration check.");
+    std::getchar();
+  }
   return exit_code;
 }
