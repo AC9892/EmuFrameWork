@@ -27,6 +27,9 @@ target_include_directories(EmuFrameCore PUBLIC include PRIVATE src backends/mgba
 target_link_libraries(EmuFrameCore PRIVATE mgba)
 set_target_properties(EmuFrameCore PROPERTIES OUTPUT_NAME EmuFrameCore)
 
+add_executable(EmuFrameEmbedExample examples/minimal_host.cpp)
+target_link_libraries(EmuFrameEmbedExample PRIVATE EmuFrameCore)
+
 if(WIN32)
   add_executable(EmuFrameTestHost WIN32 apps/test_host/win32_main.cpp apps/test_host/settings.cpp)
   target_link_libraries(EmuFrameTestHost PRIVATE EmuFrameCore comdlg32 winmm shell32 xinput9_1_0)

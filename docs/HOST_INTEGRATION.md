@@ -2,6 +2,8 @@
 
 Include `emuframe/emuframe.h` and link `EmuFrameCore.lib` on Windows. The host controls pacing, rendering, and audio playback. The DLL does not create a window or start its own worker thread.
 
+The build also produces `EmuFrameEmbedExample`, a small console consumer of the public API in [`examples/minimal_host.cpp`](../examples/minimal_host.cpp). Run `build/Release/EmuFrameEmbedExample.exe "<path-to-your-rom>"` on Windows. It loads a user-provided ROM, steps 120 frames, copies video pixels, drains audio samples, reports the result, and closes the ROM. It deliberately has no window, speakers, or frame clock, so it is an API integration check rather than a playable host. A game can follow the same calls, upload each RGBA frame to a texture using `pitch`, queue the returned interleaved PCM at `sample_rate`, pass its own input through `ef_set_input`, and pace `ef_run_frame` from its audio clock or native refresh rate.
+
 ```c
 #include <emuframe/emuframe.h>
 #include <stdlib.h>
